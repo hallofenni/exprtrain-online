@@ -83,6 +83,20 @@ const VAGUE_TO_PRECISE_ZH = {
 };
 const VAGUE_TO_PRECISE = VAGUE_TO_PRECISE_ZH;
 
+const DEFAULT_SCRIPT_METHOD = `## 稿子生成必须遵守的表达方法论
+
+1. 结论先行：开头第一句直接给观点、承诺或结果，不要铺垫。
+2. 钩子开场：用提问、反差、数字、场景或痛点抓住注意力。
+3. 口语短句：每句尽量控制在20字以内，像说话而不是写文章。
+4. 结构化表达：按 PREP（观点-原因-例子-重申）或 SCQA（情境-冲突-问题-答案）组织。
+5. 具体化：每个观点至少配一个数字、例子、场景或人名，避免空泛。
+6. 类比和故事：解释复杂概念时用一个生活化类比或短故事。
+7. 三点法：适合即兴感强的稿子，用“第一/第二/第三”给听众清晰抓手。
+8. 收尾行动：结尾给一句金句或明确的行动建议，不突然停止。
+9. 避免填充词和犹豫词：不用“嗯、啊、那个、就是、可能、我觉得”这类词。
+10. 自然口语节奏：加入停顿感和语气词，但不用书面连接词。
+11. 不编造事实：涉及数据、经历、案例时，用可核验或用户提供的信息；没有就写“示例数据需替换”或留空。`;
+
 // ===== Prompt 模板 =====
 function getRealtimePrompt(text, context, customPrompt) {
   const elapsed = context?.elapsedSec || 0;
@@ -594,9 +608,15 @@ class ExpressionTrainer {
     this.lastFeedbackText = '';
     this.lastReport = '';
     this.recognition = null;
+    this.scriptMode = false;
+    this.scriptText = '';
+    this.scriptLines = [];
+    this.activeScriptIndex = 0;
+    this.scriptTranscript = null;
 
     this.initElements();
     this.bindEvents();
+    this.restoreScript();
     this.showWelcome();
     track('page_view');
   }
@@ -611,6 +631,11 @@ class ExpressionTrainer {
     this.btnSettings = document.getElementById('btn-settings');
     this.btnLangToggle = document.getElementById('btn-lang-toggle');
     this.btnPromptEditor = document.getElementById('btn-prompt-editor');
+    this.btnScript = document.getElementById('btn-script');
+    this.btnScriptPrev = document.getElementById('btn-script-prev');
+    this.btnScriptNext = document.getElementById('btn-script-next');
+    this.btnExitScript = document.getElementById('btn-exit-script');
+    this.scriptModeLabel = document.getElementById('script-mode-label');
     this.btnCopyText = document.getElementById('btn-copy-text');
     this.btnSaveText = document.getElementById('btn-save-text');
     this.btnClear = document.getElementById('btn-clear');
@@ -650,6 +675,10 @@ class ExpressionTrainer {
     this.btnSettings.addEventListener('click', () => this.openSettings());
     this.btnLangToggle.addEventListener('click', () => this.toggleLang());
     this.btnPromptEditor.addEventListener('click', () => this.openPromptEditor());
+    this.btnScript.addEventListener('click', () => this.openScriptEditor());
+    this.btnScriptPrev.addEventListener('click', () => this.moveScript(-1));
+    this.btnScriptNext.addEventListener('click', () => this.moveScript(1));
+    this.btnExitScript.addEventListener('click', () => this.exitScript());
 
     // Subtitle toolbar
     this.btnPaste.addEventListener('click', () => this.openPasteModal());
@@ -671,7 +700,9 @@ class ExpressionTrainer {
 
     // Paste modal
     document.getElementById('btn-close-paste').addEventListener('click', () => this.pasteModal.classList.add('hidden'));
+    document.getElementById('btn-set-script').addEventListener('click', () => this.setScriptFromPaste());
     document.getElementById('btn-analyze-paste').addEventListener('click', () => this.analyzePastedText());
+    document.getElementById('btn-generate-script').addEventListener('click', () => this.generateScript());
 
     // Report modal
     document.getElementById('btn-close-report').addEventListener('click', () => this.reportModal.classList.add('hidden'));
@@ -738,6 +769,223 @@ class ExpressionTrainer {
       panelRight.classList.add('mobile-active');
       mainArea.classList.add('mobile-hidden');
     }
+  }
+
+  // ===== 稿子模式 =====
+  restoreScript() {
+    const raw = localStorage.getItem('expr_script');
+    if (!raw) return;
+    this.scriptText = raw;
+    this.scriptLines = this.splitScript(raw);
+    this.scriptMode = true;
+    this.activeScriptIndex = 0;
+    this.updateScriptUI();
+    this.renderScript();
+  }
+
+  openScriptEditor() {
+    document.getElementById('paste-modal-title').textContent = '📖 稿子';
+    document.getElementById('paste-modal-desc').textContent = '粘贴你要念的稿子，设置后就可以边看稿子边录音。';
+    document.getElementById('script-method').value = localStorage.getItem('expr_script_method') || DEFAULT_SCRIPT_METHOD;
+    const status = document.getElementById('script-gen-status');
+    status.textContent = '';
+    status.className = 'script-gen-status';
+    const textarea = document.getElementById('paste-textarea');
+    textarea.value = this.scriptText || '';
+    textarea.placeholder = '在这里粘贴你要念的稿子...';
+    this.pasteModal.classList.remove('hidden');
+    textarea.focus();
+  }
+
+  setScriptFromPaste() {
+    const text = document.getElementById('paste-textarea').value.trim();
+    if (!text) return;
+    this.pasteModal.classList.add('hidden');
+    this.setScript(text);
+    this.addFeedbackItem('📖 稿子已设置，开始录音即可边看边念', 'good');
+  }
+
+  async generateScript() {
+    const request = document.getElementById('script-request').value.trim();
+    const status = document.getElementById('script-gen-status');
+
+    if (!request) {
+      status.textContent = '请先填写念稿需求';
+      status.className = 'script-gen-status error';
+      return;
+    }
+
+    const settings = loadSettings();
+    if (!settings.apiKey) {
+      status.textContent = '请先配置大模型 API Key';
+      status.className = 'script-gen-status error';
+      this.openSettings(true);
+      return;
+    }
+
+    const methodInput = document.getElementById('script-method').value.trim();
+    const method = methodInput || DEFAULT_SCRIPT_METHOD;
+    localStorage.setItem('expr_script_method', method);
+
+    status.textContent = '⏳ 正在生成稿子...';
+    status.className = 'script-gen-status';
+
+    const isEn = getLang() === 'en';
+    const system = isEn
+      ? `You are a speech script coach. Generate a speech script that follows this methodology strictly:\n\n${method}\n\nRequirements:\n- Output only the script text.\n- Use short spoken sentences.\n- No markdown headings, code fences, explanations, or surrounding quotes.\n- Keep each paragraph short and easy to read from a teleprompter.`
+      : `你是口语表达稿写作教练。严格按下面的方法论生成一篇适合提词器跟读的稿子：\n\n${method}\n\n硬性要求：\n- 只输出稿子正文，不要输出标题、解释、markdown 代码块或“好的”。\n- 用口语短句，每段不要太长，方便提词器逐句跟读。\n- 开头要有钩子，中间有具体例子，结尾有行动或金句。\n- 不要使用填充词。`;
+    const user = isEn ? `Script request: ${request}` : `念稿需求：${request}`;
+
+    const content = await callAI([
+      { role: 'system', content: system },
+      { role: 'user', content: user }
+    ], 2000);
+
+    if (!content) {
+      status.textContent = '生成失败，请检查 API 配置或网络';
+      status.className = 'script-gen-status error';
+      return;
+    }
+
+    const clean = content
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/^#{1,4}\s+/gm, '')
+      .replace(/^["']|["']$/g, '')
+      .trim();
+
+    document.getElementById('paste-textarea').value = clean;
+    status.textContent = '✅ 已生成，可以修改后设为提词稿';
+    status.className = 'script-gen-status success';
+  }
+
+  splitScript(text) {
+    return text
+      .split(/\n+/)
+      .map(s => s.trim())
+      .filter(Boolean)
+      .flatMap(paragraph => {
+        const parts = paragraph.split(/(?<=[。！？!?；;])/).map(s => s.trim()).filter(Boolean);
+        return parts.length > 1 ? parts : [paragraph];
+      });
+  }
+
+  setScript(text) {
+    if (this.isRecording) this.stopRecording();
+    this.scriptText = text;
+    this.scriptLines = this.splitScript(text);
+    this.scriptMode = true;
+    this.activeScriptIndex = 0;
+    localStorage.setItem('expr_script', text);
+
+    this.fullText = '';
+    this.sentences = [];
+    this.lastReport = '';
+    this.resetStats();
+    this.timer.textContent = '00:00';
+    this.timer.classList.remove('active');
+    this.btnReport.classList.add('hidden');
+    this.btnCopyText.classList.add('hidden');
+    this.btnSaveText.classList.add('hidden');
+    this.btnClear.classList.add('hidden');
+    this.updateScriptUI();
+    this.renderScript();
+  }
+
+  updateScriptUI() {
+    const show = this.scriptMode;
+    this.scriptModeLabel.classList.toggle('hidden', !show);
+    this.btnScriptPrev.classList.toggle('hidden', !show);
+    this.btnScriptNext.classList.toggle('hidden', !show);
+    this.btnExitScript.classList.toggle('hidden', !show);
+    this.btnScript.textContent = show ? '📖 编辑稿子' : '📖 稿子';
+  }
+
+  exitScript() {
+    if (this.isRecording) this.stopRecording();
+    this.scriptMode = false;
+    this.scriptText = '';
+    this.scriptLines = [];
+    this.activeScriptIndex = 0;
+    localStorage.removeItem('expr_script');
+    this.updateScriptUI();
+    this.clearAll();
+  }
+
+  renderScript() {
+    this.subtitleContainer.innerHTML = '';
+    const scriptBox = document.createElement('div');
+    scriptBox.className = 'script-container';
+
+    this.scriptLines.forEach((line, index) => {
+      const el = document.createElement('div');
+      el.className = 'script-line' + (index === this.activeScriptIndex ? ' active' : '');
+      el.textContent = line;
+      el.addEventListener('click', () => this.setActiveScriptLine(index));
+      scriptBox.appendChild(el);
+    });
+
+    this.subtitleContainer.appendChild(scriptBox);
+
+    const existingTranscript = this.subtitleScroll.querySelector('.script-transcript-sticky');
+    if (existingTranscript) existingTranscript.remove();
+    this.scriptTranscript = document.createElement('div');
+    this.scriptTranscript.className = 'script-transcript-sticky';
+    this.scriptTranscript.innerHTML = '<div class="script-transcript-label">实时识别</div><div class="script-transcript-text">开始录音后，这里会显示你说的话</div>';
+    this.subtitleScroll.appendChild(this.scriptTranscript);
+    this.scrollToActiveScript();
+  }
+
+  moveScript(delta) {
+    if (!this.scriptLines.length) return;
+    const next = Math.max(0, Math.min(this.scriptLines.length - 1, this.activeScriptIndex + delta));
+    this.setActiveScriptLine(next);
+  }
+
+  setActiveScriptLine(index) {
+    this.activeScriptIndex = index;
+    this.subtitleContainer.querySelectorAll('.script-line').forEach((el, i) => {
+      el.classList.toggle('active', i === index);
+    });
+    this.scrollToActiveScript();
+  }
+
+  scrollToActiveScript() {
+    if (!this.scriptMode) return;
+    const active = this.subtitleContainer.querySelector('.script-line.active');
+    if (!active || !this.subtitleScroll) return;
+    const containerRect = this.subtitleScroll.getBoundingClientRect();
+    const activeRect = active.getBoundingClientRect();
+    const target = this.subtitleScroll.scrollTop + (activeRect.top - containerRect.top) - containerRect.height * 0.35;
+    this.subtitleScroll.scrollTop = Math.max(0, target);
+  }
+
+  advanceScript() {
+    if (!this.scriptMode || !this.scriptLines.length) return;
+    const spoken = this.normalizeForMatch(this.fullText);
+    if (!spoken) return;
+    let best = -1;
+    for (let i = 0; i < this.scriptLines.length; i++) {
+      const lineNorm = this.normalizeForMatch(this.scriptLines[i]);
+      if (lineNorm && spoken.includes(lineNorm)) best = i;
+    }
+    if (best >= 0 && best !== this.activeScriptIndex) this.setActiveScriptLine(best);
+  }
+
+  normalizeForMatch(text) {
+    return String(text || '').toLowerCase().replace(/[\s，。！？、；：“”‘’"'.,!?;:()（）\-—…·]/g, '');
+  }
+
+  renderScriptTranscript(currentText, isFinal) {
+    let box = this.subtitleScroll.querySelector('.script-transcript-sticky');
+    if (!box) {
+      box = document.createElement('div');
+      box.className = 'script-transcript-sticky';
+      box.innerHTML = '<div class="script-transcript-label">实时识别</div><div class="script-transcript-text"></div>';
+      this.subtitleScroll.appendChild(box);
+    }
+    const el = box.querySelector('.script-transcript-text');
+    el.textContent = currentText;
+    if (isFinal) this.advanceScript();
   }
 
   // ===== Settings =====
@@ -948,7 +1196,11 @@ class ExpressionTrainer {
     this.fullText = '';
     this.sentences = [];
     this.resetStats();
-    this.subtitleContainer.innerHTML = '';
+    if (this.scriptMode) {
+      this.renderScript();
+    } else {
+      this.subtitleContainer.innerHTML = '';
+    }
 
     // UI
     this.btnStart.classList.add('hidden');
@@ -1039,6 +1291,11 @@ class ExpressionTrainer {
   }
 
   renderSubtitle(currentText, isFinal) {
+    if (this.scriptMode) {
+      this.renderScriptTranscript(currentText, isFinal);
+      return;
+    }
+
     if (isFinal) {
       const interim = this.subtitleContainer.querySelector('.interim-line');
       if (interim) interim.remove();
@@ -1285,7 +1542,14 @@ class ExpressionTrainer {
 
   // ===== 粘贴逐字稿分析 =====
   openPasteModal() {
+    document.getElementById('paste-modal-title').textContent = '📋 粘贴逐字稿';
+    document.getElementById('paste-modal-desc').textContent = '把逐字稿粘贴进来，我帮你分析';
+    document.getElementById('script-request').value = '';
+    const status = document.getElementById('script-gen-status');
+    status.textContent = '';
+    status.className = 'script-gen-status';
     document.getElementById('paste-textarea').value = '';
+    document.getElementById('paste-textarea').placeholder = '在这里粘贴文字...';
     this.pasteModal.classList.remove('hidden');
     document.getElementById('paste-textarea').focus();
   }
@@ -1295,6 +1559,13 @@ class ExpressionTrainer {
     if (!text) return;
 
     this.pasteModal.classList.add('hidden');
+    if (this.scriptMode) {
+      this.scriptMode = false;
+      this.updateScriptUI();
+      const transcriptBox = this.subtitleScroll.querySelector('.script-transcript-sticky');
+      if (transcriptBox) transcriptBox.remove();
+      this.scriptTranscript = null;
+    }
     this.subtitleContainer.innerHTML = '';
     this.fullText = text;
     this.resetStats();
@@ -1385,7 +1656,14 @@ class ExpressionTrainer {
     this.fullText = '';
     this.sentences = [];
     this.lastReport = '';
-    this.subtitleContainer.innerHTML = '<div class="subtitle-line hint">点击下方按钮开始说话</div>';
+    if (this.scriptMode) {
+      this.renderScript();
+    } else {
+      this.subtitleContainer.innerHTML = '<div class="subtitle-line hint">点击下方按钮开始说话</div>';
+      const transcriptBox = this.subtitleScroll.querySelector('.script-transcript-sticky');
+      if (transcriptBox) transcriptBox.remove();
+      this.scriptTranscript = null;
+    }
     this.feedbackContent.innerHTML = '';
     this.resetStats();
     this.timer.textContent = '00:00';

@@ -57,9 +57,16 @@
 
       <!-- 字幕区顶部工具栏 -->
       <div class="subtitle-topbar">
-        <button id="btn-paste" class="btn-sm btn-paste-top">
-          <span>📋</span> 粘贴逐字稿
-        </button>
+        <div class="subtitle-topbar-left">
+          <button id="btn-paste" class="btn-sm btn-paste-top">
+            <span>📋</span> 粘贴逐字稿
+          </button>
+          <button id="btn-script" class="btn-sm btn-script-top">📖 稿子</button>
+          <span id="script-mode-label" class="script-mode-label hidden">📖 稿子模式</span>
+          <button id="btn-script-prev" class="btn-sm hidden" title="上一段">↑</button>
+          <button id="btn-script-next" class="btn-sm hidden" title="下一段">↓</button>
+          <button id="btn-exit-script" class="btn-sm hidden" title="退出稿子">✕ 退出</button>
+        </div>
         <div class="subtitle-topbar-right">
           <button id="btn-copy-text" class="btn-sm hidden" title="复制原文">📋 复制</button>
           <button id="btn-save-text" class="btn-sm hidden" title="保存原文">💾 保存</button>
@@ -253,13 +260,30 @@
   <div id="paste-modal" class="modal hidden">
     <div class="modal-content">
       <div class="modal-header">
-        <h2>📋 粘贴逐字稿</h2>
+        <h2 id="paste-modal-title">📋 粘贴逐字稿</h2>
         <button id="btn-close-paste" class="btn-close">×</button>
       </div>
       <div class="modal-body" style="display:flex;flex-direction:column;gap:12px;">
-        <p style="color:#888;font-size:13px;">把逐字稿粘贴进来，我帮你分析</p>
-        <textarea id="paste-textarea" placeholder="在这里粘贴文字..." style="flex:1;min-height:300px;background:#0a0a0a;border:1px solid #333;border-radius:8px;padding:16px;color:#fff;font-size:14px;line-height:1.8;resize:none;font-family:inherit;"></textarea>
-        <button id="btn-analyze-paste" class="btn-main btn-start" style="padding:12px 20px;align-self:flex-end;">🔍 开始分析</button>
+        <p id="paste-modal-desc" style="color:#888;font-size:13px;">把逐字稿粘贴进来，我帮你分析</p>
+        <div class="script-gen-box">
+          <div class="settings-group">
+            <label class="settings-label">念稿需求</label>
+            <textarea id="script-request" class="settings-textarea" style="min-height:70px;" placeholder="例如：3分钟，关于AI对教育的影响，口语化，开头要有钩子"></textarea>
+          </div>
+          <div class="settings-group">
+            <label class="settings-label">表达方法论</label>
+            <textarea id="script-method" class="settings-textarea" style="min-height:110px;" placeholder="默认使用内置方法论，也可以粘贴你从练习书里提炼的规则"></textarea>
+          </div>
+          <div class="script-gen-actions">
+            <button id="btn-generate-script" class="btn-main" style="background:#222;color:#fff;border:1px solid #E5007E;">✨ AI 生成稿子</button>
+            <span id="script-gen-status" class="script-gen-status"></span>
+          </div>
+        </div>
+        <textarea id="paste-textarea" placeholder="在这里粘贴文字..." style="flex:1;min-height:180px;background:#0a0a0a;border:1px solid #333;border-radius:8px;padding:16px;color:#fff;font-size:14px;line-height:1.8;resize:none;font-family:inherit;"></textarea>
+        <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;">
+          <button id="btn-set-script" class="btn-main" style="padding:12px 20px;background:#222;color:#fff;border:1px solid #E5007E;">📖 设为提词稿</button>
+          <button id="btn-analyze-paste" class="btn-main btn-start" style="padding:12px 20px;">🔍 开始分析</button>
+        </div>
       </div>
     </div>
   </div>
