@@ -1137,84 +1137,94 @@ class ExpressionTrainer {
   // ===== 录制控制 (Web Speech API) =====
   async startRecording() {
     this.setAsrStatus('正在请求麦克风权限...');
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      this.showError('浏览器不支持语音识别，请使用Chrome/Edge/Safari');
-      return;
-    }
+    this.recordingChunks = [];
+    this.mediaRecorder = null;
+    this.audioStream = null;
 
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        stream.getTracks().forEach(track => track.stop());
-        this.setAsrStatus('麦克风已授权，正在启动语音识别...');
+        this.audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        this.setAsrStatus('麦克风已授权，正在启动录音...');
+        if (window.MediaRecorder) {
+          this.mediaRecorder = new MediaRecorder(this.audioStream);
+          this.mediaRecorder.ondataavailable = (event) => {
+            if (event.data && event.data.size > 0) this.recordingChunks.push(event.data);
+          };
+          this.mediaRecorder.start(1000);
+        }
       } catch (err) {
         this.showAsrError('麦克风权限被拒绝，请在浏览器地址栏允许麦克风后重试');
         return;
       }
     }
 
-    this.recognition = new SpeechRecognition();
-    this.recognition.lang = getLang() === 'en' ? 'en-US' : 'zh-CN';
-    this.recognition.continuous = true;
-    this.recognition.interimResults = true;
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      this.setAsrStatus('当前浏览器不支持实时语音识别，将录音后AI转写');
+    }
 
-    this.recognition.onstart = () => {
-      this.setAsrStatus('录音已开始，请说话');
-    };
+    if (SpeechRecognition) {
+      this.recognition = new SpeechRecognition();
+      this.recognition.lang = getLang() === 'en' ? 'en-US' : 'zh-CN';
+      this.recognition.continuous = true;
+      this.recognition.interimResults = true;
 
-    this.recognition.onresult = (event) => {
-      if (this.isPaused) return;
-      let interimTranscript = '';
-      let finalTranscript = '';
-
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          finalTranscript += transcript;
-        } else {
-          interimTranscript += transcript;
-        }
-      }
-
-      if (finalTranscript) {
-        this.handleASRResult({ text: finalTranscript, isFinal: true });
-      }
-      if (interimTranscript) {
-        this.handleASRResult({ text: interimTranscript, isFinal: false });
-      }
-    };
-
-    this.recognition.onerror = (event) => {
-      if (event.error === 'no-speech') {
-        this.setAsrStatus('没有听到声音，请靠近麦克风说话');
-        return;
-      }
-      if (event.error === 'aborted') return;
-      console.error('[ASR] Error:', event.error);
-      const messages = {
-        'not-allowed': '麦克风权限被拒绝，请在浏览器地址栏允许麦克风后重试',
-        'service-not-allowed': '浏览器阻止了语音识别服务，请检查浏览器权限设置',
-        'network': '语音识别服务连接失败，可能是当前网络无法访问识别服务',
-        'audio-capture': '没有检测到可用的麦克风，请检查麦克风设备',
-        'language-not-supported': '当前语言不支持语音识别，请切换中/英后重试'
+      this.recognition.onstart = () => {
+        this.setAsrStatus('录音已开始，请说话');
       };
-      this.showAsrError(messages[event.error] || `语音识别错误：${event.error}`);
-    };
 
-    this.recognition.onend = () => {
-      // Auto-restart if still recording
-      if (this.isRecording && !this.isPaused) {
-        this.setAsrStatus('识别连接中断，正在重连...');
-        try { this.recognition.start(); } catch (e) { /* ignore */ }
+      this.recognition.onresult = (event) => {
+        if (this.isPaused) return;
+        let interimTranscript = '';
+        let finalTranscript = '';
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript;
+          } else {
+            interimTranscript += transcript;
+          }
+        }
+
+        if (finalTranscript) {
+          this.handleASRResult({ text: finalTranscript, isFinal: true });
+        }
+        if (interimTranscript) {
+          this.handleASRResult({ text: interimTranscript, isFinal: false });
+        }
+      };
+
+      this.recognition.onerror = (event) => {
+        if (event.error === 'no-speech') {
+          this.setAsrStatus('没有听到声音，请靠近麦克风说话');
+          return;
+        }
+        if (event.error === 'aborted') return;
+        console.error('[ASR] Error:', event.error);
+        const messages = {
+          'not-allowed': '麦克风权限被拒绝，请在浏览器地址栏允许麦克风后重试',
+          'service-not-allowed': '浏览器阻止了语音识别服务，请检查浏览器权限设置',
+          'network': '语音识别服务连接失败，可能是当前网络无法访问识别服务',
+          'audio-capture': '没有检测到可用的麦克风，请检查麦克风设备',
+          'language-not-supported': '当前语言不支持语音识别，请切换中/英后重试'
+        };
+        this.showAsrError(messages[event.error] || `语音识别错误：${event.error}`);
+      };
+
+      this.recognition.onend = () => {
+        // Auto-restart if still recording
+        if (this.isRecording && !this.isPaused) {
+          this.setAsrStatus('识别连接中断，正在重连...');
+          try { this.recognition.start(); } catch (e) { /* ignore */ }
+        }
+      };
+
+      try {
+        this.recognition.start();
+      } catch (err) {
+        this.setAsrStatus('实时语音识别启动失败，将录音后AI转写');
       }
-    };
-
-    try {
-      this.recognition.start();
-    } catch (err) {
-      this.showError(`语音识别启动失败: ${err.message}`);
-      return;
     }
 
     this.isRecording = true;
@@ -1251,6 +1261,9 @@ class ExpressionTrainer {
     if (this.recognition) {
       try { this.recognition.stop(); } catch (e) { /* ignore */ }
     }
+    if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+      try { this.mediaRecorder.pause(); } catch (e) { /* ignore */ }
+    }
     this.btnPause.classList.add('hidden');
     this.btnResume.classList.remove('hidden');
     this.timer.classList.remove('active');
@@ -1263,18 +1276,38 @@ class ExpressionTrainer {
     if (this.recognition) {
       try { this.recognition.start(); } catch (e) { /* ignore */ }
     }
+    if (this.mediaRecorder && this.mediaRecorder.state === 'paused') {
+      try { this.mediaRecorder.resume(); } catch (e) { /* ignore */ }
+    }
     this.btnResume.classList.add('hidden');
     this.btnPause.classList.remove('hidden');
     this.timer.classList.add('active');
   }
 
-  stopRecording() {
+  async stopRecording() {
+    this.isRecording = false;
+    this.isPaused = false;
     if (this.recognition) {
       try { this.recognition.stop(); } catch (e) { /* ignore */ }
       this.recognition = null;
     }
-    this.isRecording = false;
-    this.isPaused = false;
+
+    if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+      await new Promise((resolve) => {
+        this.mediaRecorder.onstop = resolve;
+        try { this.mediaRecorder.stop(); } catch (e) { resolve(); }
+      });
+    }
+    if (this.audioStream) {
+      this.audioStream.getTracks().forEach(track => track.stop());
+      this.audioStream = null;
+    }
+
+    const audioBlob = this.recordingChunks.length > 0
+      ? new Blob(this.recordingChunks, { type: this.mediaRecorder ? this.mediaRecorder.mimeType : 'audio/webm' })
+      : null;
+    this.recordingChunks = [];
+    this.mediaRecorder = null;
 
     clearInterval(this.timerInterval);
     let totalPaused = this.pausedTime;
@@ -1296,10 +1329,64 @@ class ExpressionTrainer {
     }
 
     track('recording_stop', { duration: this.stats.duration, words: this.stats.totalWords });
+
+    if (!this.fullText.trim() && audioBlob) {
+      await this.transcribeWithProvider(audioBlob);
+    }
+
     // 上报训练数据到后端
     if (this.fullText.trim()) {
       const density = this.stats.totalWords > 0 ? ((this.stats.totalWords - this.stats.fillers - this.stats.hedges) / this.stats.totalWords * 100).toFixed(0) + '%' : '--';
       reportToBackend('/api/session', { duration: this.stats.duration, totalWords: this.stats.totalWords, fillers: this.stats.fillers, hedges: this.stats.hedges, vagueWords: this.stats.vagueWords, density, fullText: this.fullText.slice(0, 5000) });
+    }
+  }
+
+  async transcribeWithProvider(blob) {
+    const settings = loadSettings();
+    if (!settings.apiKey) {
+      this.setAsrStatus('没有识别到语音，且未配置API，无法自动转写');
+      return;
+    }
+    if (settings.provider === 'deepseek') {
+      this.setAsrStatus('实时语音识别没有结果；DeepSeek不支持语音转写，请配置OpenAI或兼容服务');
+      this.addFeedbackItem('实时语音识别没有结果；DeepSeek不支持语音转写，请配置OpenAI或兼容服务', 'ai');
+      return;
+    }
+
+    this.setAsrStatus('实时识别无结果，正在用AI转写录音...');
+    const config = getProviderConfig(settings);
+    const endpoint = config.endpoint.replace(/\/chat\/completions$/, '/audio/transcriptions');
+    const form = new FormData();
+    form.append('file', blob, 'recording.webm');
+    form.append('model', 'whisper-1');
+    form.append('language', getLang() === 'en' ? 'en' : 'zh');
+
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${config.apiKey}` },
+        body: form
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const data = await response.json();
+      const text = (data.text || data.transcript || '').trim();
+      if (!text) {
+        this.setAsrStatus('AI转写没有识别到文字');
+        return;
+      }
+      this.handleASRResult({ text, isFinal: true });
+      this.btnReport.classList.remove('hidden');
+      this.btnCopyText.classList.remove('hidden');
+      this.btnSaveText.classList.remove('hidden');
+      this.btnClear.classList.remove('hidden');
+      this.setAsrStatus('AI转写完成');
+      this.addFeedbackItem('录音已用AI转写完成', 'good');
+    } catch (err) {
+      console.error('[Transcribe] Error:', err);
+      this.setAsrStatus('AI转写失败，请检查API配置');
+      this.addFeedbackItem('AI转写失败，请检查API配置', 'ai');
     }
   }
 
