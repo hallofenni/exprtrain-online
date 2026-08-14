@@ -1356,9 +1356,11 @@ class ExpressionTrainer {
     this.setAsrStatus('实时识别无结果，正在用AI转写录音...');
     const config = getProviderConfig(settings);
     const endpoint = config.endpoint.replace(/\/chat\/completions$/, '/audio/transcriptions');
+    const defaultOpenAiModel = settings.provider === 'openai' && (!config.model || config.model === 'gpt-4o-mini');
+    const transcribeModel = defaultOpenAiModel ? 'whisper-1' : (config.model || 'whisper-1');
     const form = new FormData();
     form.append('file', blob, 'recording.webm');
-    form.append('model', 'whisper-1');
+    form.append('model', transcribeModel);
     form.append('language', getLang() === 'en' ? 'en' : 'zh');
 
     try {
