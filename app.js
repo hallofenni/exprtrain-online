@@ -1136,6 +1136,7 @@ class ExpressionTrainer {
 
   // ===== 录制控制 (Web Speech API) =====
   async startRecording() {
+    this.setAsrStatus('正在请求麦克风权限...');
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
       this.showError('浏览器不支持语音识别，请使用Chrome/Edge/Safari');
@@ -1146,6 +1147,7 @@ class ExpressionTrainer {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         stream.getTracks().forEach(track => track.stop());
+        this.setAsrStatus('麦克风已授权，正在启动语音识别...');
       } catch (err) {
         this.showAsrError('麦克风权限被拒绝，请在浏览器地址栏允许麦克风后重试');
         return;
@@ -1156,6 +1158,10 @@ class ExpressionTrainer {
     this.recognition.lang = getLang() === 'en' ? 'en-US' : 'zh-CN';
     this.recognition.continuous = true;
     this.recognition.interimResults = true;
+
+    this.recognition.onstart = () => {
+      this.setAsrStatus('录音已开始，请说话');
+    };
 
     this.recognition.onresult = (event) => {
       if (this.isPaused) return;
@@ -1180,7 +1186,10 @@ class ExpressionTrainer {
     };
 
     this.recognition.onerror = (event) => {
-      if (event.error === 'no-speech') return; // normal
+      if (event.error === 'no-speech') {
+        this.setAsrStatus('没有听到声音，请靠近麦克风说话');
+        return;
+      }
       if (event.error === 'aborted') return;
       console.error('[ASR] Error:', event.error);
       const messages = {
@@ -1196,6 +1205,7 @@ class ExpressionTrainer {
     this.recognition.onend = () => {
       // Auto-restart if still recording
       if (this.isRecording && !this.isPaused) {
+        this.setAsrStatus('识别连接中断，正在重连...');
         try { this.recognition.start(); } catch (e) { /* ignore */ }
       }
     };
@@ -1642,6 +1652,16 @@ class ExpressionTrainer {
     line.textContent = msg;
     this.subtitleContainer.appendChild(line);
     this.subtitleScroll.scrollTop = this.subtitleScroll.scrollHeight;
+  }
+
+  setAsrStatus(text) {
+    let el = this.subtitleContainer.querySelector('.asr-status');
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'subtitle-line asr-status';
+      this.subtitleContainer.appendChild(el);
+    }
+    el.textContent = text;
   }
 
   showError(msg) {

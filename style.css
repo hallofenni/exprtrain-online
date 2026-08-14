@@ -215,6 +215,7 @@ button, input, select, textarea, .subtitle-scroll, .feedback-content, .modal-bod
 .subtitle-line.old { color: #666; font-size: 22px; }
 .subtitle-line.hint { color: #444; font-size: 20px; }
 .subtitle-line.interim-line { color: #aaa; }
+.subtitle-line.asr-status { color: #69db7c; font-size: 14px; font-weight: 500; }
 
 /* 稿子模式 */
 .script-container {
