@@ -1135,11 +1135,21 @@ class ExpressionTrainer {
   }
 
   // ===== 录制控制 (Web Speech API) =====
-  startRecording() {
+  async startRecording() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
       this.showError('浏览器不支持语音识别，请使用Chrome/Edge/Safari');
       return;
+    }
+
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(track => track.stop());
+      } catch (err) {
+        this.showAsrError('麦克风权限被拒绝，请在浏览器地址栏允许麦克风后重试');
+        return;
+      }
     }
 
     this.recognition = new SpeechRecognition();
@@ -1173,6 +1183,14 @@ class ExpressionTrainer {
       if (event.error === 'no-speech') return; // normal
       if (event.error === 'aborted') return;
       console.error('[ASR] Error:', event.error);
+      const messages = {
+        'not-allowed': '麦克风权限被拒绝，请在浏览器地址栏允许麦克风后重试',
+        'service-not-allowed': '浏览器阻止了语音识别服务，请检查浏览器权限设置',
+        'network': '语音识别服务连接失败，可能是当前网络无法访问识别服务',
+        'audio-capture': '没有检测到可用的麦克风，请检查麦克风设备',
+        'language-not-supported': '当前语言不支持语音识别，请切换中/英后重试'
+      };
+      this.showAsrError(messages[event.error] || `语音识别错误：${event.error}`);
     };
 
     this.recognition.onend = () => {
@@ -1614,6 +1632,16 @@ class ExpressionTrainer {
     this.wordCounts = {};
     this.updateStatsDisplay();
     this.feedbackContent.innerHTML = '';
+  }
+
+  showAsrError(msg) {
+    this.addFeedbackItem(msg, 'ai');
+    const line = document.createElement('div');
+    line.className = 'subtitle-line';
+    line.style.color = '#ff6b6b';
+    line.textContent = msg;
+    this.subtitleContainer.appendChild(line);
+    this.subtitleScroll.scrollTop = this.subtitleScroll.scrollHeight;
   }
 
   showError(msg) {
