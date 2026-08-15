@@ -530,7 +530,7 @@ function loadProviderSettings(provider) {
   const raw = localStorage.getItem('expr_settings_' + provider);
   if (raw) return JSON.parse(raw);
   const defaults = PROVIDER_DEFAULTS[provider] || PROVIDER_DEFAULTS.deepseek;
-  return { apiKey: '', model: '', baseUrl: defaults.baseUrl };
+  return { apiKey: '', model: '', transcribeModel: '', baseUrl: defaults.baseUrl };
 }
 
 function saveProviderSettings(provider, settings) {
@@ -544,7 +544,7 @@ function loadSettings() {
     try {
       const old = JSON.parse(legacy);
       const provider = old.provider || 'deepseek';
-      const migrated = { apiKey: old.apiKey || '', model: old.model || '', baseUrl: old.customEndpoint ? old.customEndpoint.replace(/\/chat\/completions\/?$/, '') : (PROVIDER_DEFAULTS[provider]?.baseUrl || '') };
+      const migrated = { apiKey: old.apiKey || '', model: old.model || '', transcribeModel: old.transcribeModel || '', baseUrl: old.customEndpoint ? old.customEndpoint.replace(/\/chat\/completions\/?$/, '') : (PROVIDER_DEFAULTS[provider]?.baseUrl || '') };
       saveProviderSettings(provider, migrated);
       setActiveProvider(provider);
       localStorage.removeItem('expr_settings');
@@ -557,9 +557,9 @@ function loadSettings() {
 }
 
 function saveSettings(settings) {
-  const { provider, apiKey, model, baseUrl } = settings;
+  const { provider, apiKey, model, transcribeModel, baseUrl } = settings;
   setActiveProvider(provider);
-  saveProviderSettings(provider, { apiKey, model, baseUrl });
+  saveProviderSettings(provider, { apiKey, model, transcribeModel, baseUrl });
 }
 
 function loadCustomPrompt() {
@@ -1005,6 +1005,7 @@ class ExpressionTrainer {
     providerSelect.value = settings.provider || 'deepseek';
     document.getElementById('settings-apikey').value = settings.apiKey || '';
     document.getElementById('settings-model').value = settings.model || '';
+    document.getElementById('settings-transcribe-model').value = settings.transcribeModel || '';
     const defaults = PROVIDER_DEFAULTS[settings.provider] || PROVIDER_DEFAULTS.deepseek;
     document.getElementById('settings-baseurl').value = settings.baseUrl || defaults.baseUrl || '';
     document.getElementById('settings-model').placeholder = defaults.model;
@@ -1025,6 +1026,7 @@ class ExpressionTrainer {
     const defaults = PROVIDER_DEFAULTS[provider] || PROVIDER_DEFAULTS.deepseek;
     document.getElementById('settings-apikey').value = providerSettings.apiKey || '';
     document.getElementById('settings-model').value = providerSettings.model || '';
+    document.getElementById('settings-transcribe-model').value = providerSettings.transcribeModel || '';
     document.getElementById('settings-baseurl').value = providerSettings.baseUrl || defaults.baseUrl || '';
     document.getElementById('settings-model').placeholder = defaults.model;
     document.getElementById('settings-baseurl').placeholder = defaults.baseUrl || 'https://api.example.com/v1';
@@ -1038,6 +1040,7 @@ class ExpressionTrainer {
       provider: document.getElementById('settings-provider').value,
       apiKey: document.getElementById('settings-apikey').value.trim(),
       model: document.getElementById('settings-model').value.trim(),
+      transcribeModel: document.getElementById('settings-transcribe-model').value.trim(),
       baseUrl: document.getElementById('settings-baseurl').value.trim()
     };
   }
@@ -1101,16 +1104,22 @@ class ExpressionTrainer {
   }
 
   async saveSettingsForm() {
-    // 先测试连通性
-    const success = await this.testConnectivity();
-    if (!success) {
-      // 不保存，提示用户核对
-      return;
-    }
     const settings = this.getSettingsFormValues();
+    const voiceOnly = settings.transcribeModel || /(sensevoice|whisper|audio|transcri)/i.test(settings.model);
+    if (voiceOnly) {
+      const testResult = document.getElementById('settings-test-result');
+      testResult.className = 'settings-test-result success';
+      testResult.textContent = '✓ 语音转写模型已保存（跳过对话测试）';
+      testResult.classList.remove('hidden');
+    } else {
+      const success = await this.testConnectivity();
+      if (!success) {
+        return;
+      }
+    }
     saveSettings(settings);
     this.settingsModal.classList.add('hidden');
-    this.addFeedbackItem('✅ 大模型配置已保存', 'good');
+    this.addFeedbackItem(voiceOnly ? '✅ 语音转写配置已保存' : '✅ 大模型配置已保存', 'good');
   }
 
   // ===== Prompt Editor =====
@@ -1356,12 +1365,16 @@ class ExpressionTrainer {
     this.setAsrStatus('实时识别无结果，正在用AI转写录音...');
     const config = getProviderConfig(settings);
     const endpoint = config.endpoint.replace(/\/chat\/completions$/, '/audio/transcriptions');
-    const defaultOpenAiModel = settings.provider === 'openai' && (!config.model || config.model === 'gpt-4o-mini');
-    const transcribeModel = defaultOpenAiModel ? 'whisper-1' : (config.model || 'whisper-1');
+    let transcribeModel = settings.transcribeModel || config.model || 'whisper-1';
+    if (settings.provider === 'openai' && (!config.model || config.model === 'gpt-4o-mini')) {
+      transcribeModel = 'whisper-1';
+    }
     const form = new FormData();
     form.append('file', blob, 'recording.webm');
     form.append('model', transcribeModel);
-    form.append('language', getLang() === 'en' ? 'en' : 'zh');
+    if (settings.provider === 'openai') {
+      form.append('language', getLang() === 'en' ? 'en' : 'zh');
+    }
 
     try {
       const response = await fetch(endpoint, {

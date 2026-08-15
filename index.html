@@ -208,6 +208,11 @@
           <label class="settings-label">模型</label>
           <input id="settings-model" type="text" class="settings-input" placeholder="deepseek-chat">
         </div>
+        <div class="settings-group">
+          <label class="settings-label">语音转写模型（可选）</label>
+          <input id="settings-transcribe-model" type="text" class="settings-input" placeholder="例如：FunAudioLLM/SenseVoiceSmall 或 whisper-1">
+          <span class="settings-hint">用于录音后AI转写；OpenAI留空默认 whisper-1</span>
+        </div>
         <div class="settings-group" id="settings-baseurl-group">
           <label class="settings-label">Base URL</label>
           <input id="settings-baseurl" type="text" class="settings-input" placeholder="https://api.deepseek.com/v1">
