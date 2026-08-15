@@ -1162,7 +1162,14 @@ class ExpressionTrainer {
           this.mediaRecorder.start(1000);
         }
       } catch (err) {
-        this.showAsrError('麦克风权限被拒绝，请在浏览器地址栏允许麦克风后重试');
+        const ua = navigator.userAgent || '';
+        let msg = '麦克风权限被拒绝，请在浏览器和手机系统设置中都允许麦克风';
+        if (ua.includes('MicroMessenger')) {
+          msg = '当前在微信内置浏览器中，可能不允许麦克风；请用手机系统浏览器（Safari/Chrome/Edge）打开';
+        } else if (err && err.name === 'NotFoundError') {
+          msg = '没有检测到可用的麦克风设备';
+        }
+        this.showAsrError(msg);
         return;
       }
     }
@@ -1212,7 +1219,7 @@ class ExpressionTrainer {
         if (event.error === 'aborted') return;
         console.error('[ASR] Error:', event.error);
         const messages = {
-          'not-allowed': '麦克风权限被拒绝，请在浏览器地址栏允许麦克风后重试',
+          'not-allowed': '麦克风权限被拒绝，请在浏览器和手机系统设置中都允许麦克风；不要使用微信内置浏览器',
           'service-not-allowed': '浏览器阻止了语音识别服务，请检查浏览器权限设置',
           'network': '语音识别服务连接失败，可能是当前网络无法访问识别服务',
           'audio-capture': '没有检测到可用的麦克风，请检查麦克风设备',
